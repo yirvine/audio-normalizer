@@ -1,17 +1,7 @@
 {
-  "functions": {
-    "api/main.py": {
-      "runtime": "python3.9",
-      "maxDuration": 300
+  "experimental": {
+    "serverActions": {
+      "bodySizeLimit": "100mb"
     }
-  },
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/main.py"
-    }
-  ],
-  "env": {
-    "PYTHONPATH": "./api"
   }
 } 

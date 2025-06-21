@@ -13,11 +13,29 @@ const TARGET_TP = 0.0;
 
 async function normalizeTrack(inputPath: string, outputPath: string) {
   try {
-    const command = `ffmpeg -y -threads 4 -i "${inputPath}" -af "loudnorm=I=${TARGET_LUFS}:TP=${TARGET_TP}:LRA=11" -ar 44100 -c:a libmp3lame -b:a 320k "${outputPath}"`;
+    // PASS 1: Analyze the file to get precise measurements
+    const pass1Command = `ffmpeg -i "${inputPath}" -af "loudnorm=I=${TARGET_LUFS}:TP=${TARGET_TP}:LRA=11:print_format=json" -f null -`;
+    const { stderr: pass1Output } = await execAsync(pass1Command, { timeout: 60000 });
     
-    await execAsync(command, { timeout: 300000 });
+    // Extract measurements from pass 1
+    const jsonMatch = pass1Output.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('Failed to get analysis data from pass 1');
+    }
     
-    return { status: 'success', message: 'Normalized successfully' };
+    const measurements = JSON.parse(jsonMatch[0]);
+    const measuredI = measurements.input_i;
+    const measuredTP = measurements.input_tp;
+    const measuredLRA = measurements.input_lra;
+    const measuredThresh = measurements.input_thresh;
+    const targetOffset = measurements.target_offset;
+    
+    // PASS 2: Apply precise normalization using pass 1 measurements
+    const pass2Command = `ffmpeg -y -threads 4 -i "${inputPath}" -af "loudnorm=I=${TARGET_LUFS}:TP=${TARGET_TP}:LRA=11:measured_I=${measuredI}:measured_TP=${measuredTP}:measured_LRA=${measuredLRA}:measured_thresh=${measuredThresh}:offset=${targetOffset}:linear=true:print_format=summary" -ar 44100 -c:a libmp3lame -b:a 320k "${outputPath}"`;
+    
+    await execAsync(pass2Command, { timeout: 300000 });
+    
+    return { status: 'success', message: 'Normalized successfully (two-pass)' };
     
   } catch (error) {
     return { status: 'error', message: error instanceof Error ? error.message : 'Unknown error' };
