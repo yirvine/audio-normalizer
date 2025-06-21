@@ -1,103 +1,278 @@
-import Image from "next/image";
+'use client';
+
+import React, { useState, useRef } from 'react';
+
+interface AnalysisResult {
+  filename: string;
+  lufs: string | null;
+  tp: string | null;
+  status: string;
+  error?: string;
+}
+
+// Target constants - should match backend
+const TARGET_LUFS = -7.5;
+const TARGET_TP = 0.0;
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [files, setFiles] = useState<File[]>([]);
+  const [analysisResults, setAnalysisResults] = useState<AnalysisResult[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isNormalizing, setIsNormalizing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    const mp3Files = selectedFiles.filter(file => 
+      file.type === 'audio/mpeg' || file.name.toLowerCase().endsWith('.mp3')
+    );
+    setFiles(prev => [...prev, ...mp3Files]);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    const mp3Files = droppedFiles.filter(file => 
+      file.type === 'audio/mpeg' || file.name.toLowerCase().endsWith('.mp3')
+    );
+    setFiles(prev => [...prev, ...mp3Files]);
+  };
+
+  const removeFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+    setAnalysisResults([]);
+  };
+
+  const analyzeFiles = async () => {
+    if (files.length === 0) return;
+
+    setIsAnalyzing(true);
+    const formData = new FormData();
+    files.forEach(file => formData.append('files', file));
+
+    try {
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Analysis failed');
+      }
+
+      const data = await response.json();
+      setAnalysisResults(data.results);
+    } catch (error) {
+      console.error('Analysis error:', error);
+      alert('Analysis failed. Please try again.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const normalizeAndDownload = async () => {
+    if (files.length === 0) return;
+
+    setIsNormalizing(true);
+    const formData = new FormData();
+    files.forEach(file => formData.append('files', file));
+
+    try {
+      const response = await fetch('/api/normalize', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Normalization failed');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `normalized_audio_${files.length}_files.zip`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Normalization error:', error);
+      alert('Normalization failed. Please try again.');
+    } finally {
+      setIsNormalizing(false);
+    }
+  };
+
+  const formatValue = (value: string | null) => {
+    if (!value || value === 'null') return 'N/A';
+    return parseFloat(value).toFixed(1);
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+      <div className="container mx-auto px-4 py-8">
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-white mb-2">
+            LUFS Audio Normalizer
+          </h1>
+                     <p className="text-slate-300 text-lg">
+             Normalize your MP3 files to {TARGET_LUFS} LUFS and {TARGET_TP} dBTP
+           </p>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+        <div className="max-w-4xl mx-auto space-y-6">
+          {/* File Upload Area */}
+          <div className="bg-white/10 backdrop-blur-md rounded-xl p-6 border border-white/20">
+            <div
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors border-slate-400 hover:border-purple-400 hover:bg-purple-400/5"
+            >
+              <input 
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".mp3,audio/mpeg"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              <div className="text-white">
+                <svg className="mx-auto h-12 w-12 text-slate-400 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                  <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <div>
+                  <p className="text-lg mb-2">Drop MP3 files here, or click to select</p>
+                  <p className="text-sm text-slate-400">Support for multiple files</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* File List */}
+          {files.length > 0 && (
+            <div className="bg-white/10 backdrop-blur-md rounded-xl p-6 border border-white/20">
+              <h3 className="text-xl font-semibold text-white mb-4">
+                Selected Files ({files.length})
+              </h3>
+              <div className="space-y-2">
+                {files.map((file, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center justify-between bg-white/5 rounded-lg p-3 border border-white/10"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <svg className="h-6 w-6 text-purple-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M18 3a1 1 0 00-1.447-.894L8.763 6H5a3 3 0 000 6h.28l1.771 5.316A1 1 0 008 18h1a1 1 0 001-1v-4.382l6.553 3.276A1 1 0 0018 15V3z" clipRule="evenodd" />
+                      </svg>
+                      <div>
+                        <p className="text-white font-medium">{file.name}</p>
+                        <p className="text-slate-400 text-sm">
+                          {(file.size / 1024 / 1024).toFixed(2)} MB
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => removeFile(index)}
+                      className="text-red-400 hover:text-red-300 transition-colors"
+                    >
+                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          {files.length > 0 && (
+            <div className="flex flex-col sm:flex-row gap-4">
+              <button
+                onClick={analyzeFiles}
+                disabled={isAnalyzing}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:opacity-50 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
+              >
+                {isAnalyzing ? 'Analyzing...' : 'Analyze Audio'}
+              </button>
+              <button
+                onClick={normalizeAndDownload}
+                disabled={isNormalizing}
+                className="flex-1 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-800 disabled:opacity-50 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
+              >
+                {isNormalizing ? 'Normalizing...' : 'Normalize & Download'}
+              </button>
+            </div>
+          )}
+
+          {/* Analysis Results */}
+          {analysisResults.length > 0 && (
+            <div className="bg-white/10 backdrop-blur-md rounded-xl p-6 border border-white/20">
+              <h3 className="text-xl font-semibold text-white mb-4">Analysis Results</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-white/20">
+                      <th className="text-white font-semibold py-2">File</th>
+                      <th className="text-white font-semibold py-2">Current LUFS</th>
+                      <th className="text-white font-semibold py-2">Current dBTP</th>
+                      <th className="text-white font-semibold py-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {analysisResults.map((result, index) => (
+                      <tr key={index} className="border-b border-white/10">
+                        <td className="text-white py-2">{result.filename}</td>
+                        <td className="py-2">
+                          <span className={`${
+                            result.lufs && parseFloat(result.lufs) < TARGET_LUFS 
+                              ? 'text-red-400' 
+                              : result.lufs && parseFloat(result.lufs) > TARGET_LUFS
+                              ? 'text-yellow-400'
+                              : 'text-green-400'
+                          }`}>
+                            {formatValue(result.lufs)}
+                          </span>
+                        </td>
+                        <td className="py-2">
+                          <span className={`${
+                            result.tp && parseFloat(result.tp) > TARGET_TP 
+                              ? 'text-red-400' 
+                              : 'text-green-400'
+                          }`}>
+                            {formatValue(result.tp)}
+                          </span>
+                        </td>
+                        <td className="py-2">
+                          <span className={`text-sm px-2 py-1 rounded ${
+                            result.status === 'success' 
+                              ? 'bg-green-500/20 text-green-400' 
+                              : 'bg-red-500/20 text-red-400'
+                          }`}>
+                            {result.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-4 text-sm text-slate-400">
+                <p><strong>Target:</strong> {TARGET_LUFS} LUFS, {TARGET_TP} dBTP</p>
+                <p><span className="text-red-400">Red:</span> Needs normalization | <span className="text-yellow-400">Yellow:</span> Above target | <span className="text-green-400">Green:</span> Within range</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
