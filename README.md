@@ -13,7 +13,7 @@ A modern web application for batch audio normalization using LUFS (Loudness Unit
 - **🖱️ Drag & Drop Interface** - Modern, intuitive file upload with visual feedback
 - **📊 Real-time Analysis** - Color-coded LUFS/dBTP analysis with visual indicators
 - **⚡ Batch Processing** - Smart batching system handles multiple files efficiently
-- **🎯 Precision Targeting** - Two-pass normalization for accurate -7.5 LUFS / 0.0 dBTP results
+- **🎯 Precision Targeting** - Two-pass normalization for accurate -7.5 LUFS / -0.4 dBTP results
 - **📦 Zip Downloads** - Automatically packages normalized files for easy download
 - **🚀 High Performance** - Parallel processing with optimized ffmpeg workflows
 - **💎 Quality Preservation** - Maintains original bitrate and sample rate (320kbps/44.1kHz output)
@@ -21,7 +21,7 @@ A modern web application for batch audio normalization using LUFS (Loudness Unit
 ## 🎯 Target Specifications
 
 - **LUFS Target:** -7.5 LUFS (configurable)
-- **True Peak Target:** 0.0 dBTP (configurable)
+- **True Peak Target:** -0.4 dBTP (configurable)
 - **Output Quality:** 320kbps MP3, 44.1kHz
 - **Processing Accuracy:** ±0.5 LUFS tolerance (professional-grade)
 
@@ -118,16 +118,12 @@ vercel
 
 Edit target values in both frontend and backend:
 
-**Frontend** (`src/app/page.tsx`):
+**Centralized Config** (`src/lib/config.ts`):
 ```typescript
-const TARGET_LUFS = -7.5;
-const TARGET_TP = 0.0;
-```
-
-**Backend** (`src/app/api/*/route.ts`):
-```typescript
-const TARGET_LUFS = -7.5;
-const TARGET_TP = 0.0;
+export const AUDIO_CONFIG = {
+  TARGET_LUFS: -7.5,
+  TARGET_TP: -0.4,  // True Peak in dBTP
+} as const;
 ```
 
 ## 📈 Performance

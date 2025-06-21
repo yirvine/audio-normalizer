@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
+import { TARGET_LUFS, TARGET_TP } from '@/lib/config';
 
 interface AnalysisResult {
   filename: string;
@@ -9,10 +10,6 @@ interface AnalysisResult {
   status: string;
   error?: string;
 }
-
-// Target constants - should match backend
-const TARGET_LUFS = -7.5;
-const TARGET_TP = 0.0;
 
 export default function Home() {
   const [files, setFiles] = useState<File[]>([]);

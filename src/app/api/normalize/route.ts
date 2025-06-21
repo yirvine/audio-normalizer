@@ -5,11 +5,9 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import archiver from 'archiver';
+import { TARGET_LUFS, TARGET_TP } from '@/lib/config';
 
 const execAsync = promisify(exec);
-
-const TARGET_LUFS = -7.5;
-const TARGET_TP = 0.0;
 
 async function normalizeTrack(inputPath: string, outputPath: string) {
   try {
