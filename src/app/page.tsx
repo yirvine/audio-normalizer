@@ -11,6 +11,8 @@ interface AnalysisResult {
   error?: string;
 }
 
+
+
 export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
   const [analysisResults, setAnalysisResults] = useState<AnalysisResult[]>([]);
@@ -31,15 +33,72 @@ export default function Home() {
     e.stopPropagation();
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    const mp3Files = droppedFiles.filter(file => 
+    
+    const items = e.dataTransfer.items;
+    const allFiles: File[] = [];
+    
+    if (items) {
+      // Handle both files and folders
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'file') {
+          const entry = item.webkitGetAsEntry();
+          if (entry) {
+            if (entry.isDirectory) {
+              // It's a folder - get all files from it
+              const files = await getAllFiles(entry);
+              allFiles.push(...files);
+            } else {
+              // It's a single file
+              const file = item.getAsFile();
+              if (file) allFiles.push(file);
+            }
+          }
+        }
+      }
+    } else {
+      // Fallback for older browsers
+      allFiles.push(...Array.from(e.dataTransfer.files));
+    }
+    
+    // Filter for MP3 files only
+    const mp3Files = allFiles.filter(file => 
       file.type === 'audio/mpeg' || file.name.toLowerCase().endsWith('.mp3')
     );
+    
     setFiles(prev => [...prev, ...mp3Files]);
   };
+
+  // Helper function to recursively get all files from a directory
+  async function getAllFiles(dirEntry: any): Promise<File[]> {
+    const files: File[] = [];
+    const reader = dirEntry.createReader();
+    
+    const readEntries = (): Promise<any[]> => {
+      return new Promise((resolve) => {
+        reader.readEntries(resolve);
+      });
+    };
+    
+    const entries = await readEntries();
+    
+    for (const entry of entries) {
+      if (entry.isFile) {
+        const file: File = await new Promise((resolve) => {
+          entry.file(resolve);
+        });
+        files.push(file);
+      } else if (entry.isDirectory) {
+        const subFiles = await getAllFiles(entry);
+        files.push(...subFiles);
+      }
+    }
+    
+    return files;
+  }
 
   const removeFile = (index: number) => {
     setFiles(prev => prev.filter((_, i) => i !== index));
@@ -146,8 +205,8 @@ export default function Home() {
                   <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
                 <div>
-                  <p className="text-lg mb-2">Drop MP3 files here, or click to select</p>
-                  <p className="text-sm text-slate-400">Support for multiple files</p>
+                  <p className="text-lg mb-2">Drop MP3 files or folders here, or click to select</p>
+                  <p className="text-sm text-slate-400">Supports individual files and entire folders</p>
                 </div>
               </div>
             </div>
@@ -192,20 +251,23 @@ export default function Home() {
 
           {/* Action Buttons */}
           {files.length > 0 && (
-            <div className="flex flex-col sm:flex-row gap-4">
-              <button
-                onClick={analyzeFiles}
-                disabled={isAnalyzing}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:opacity-50 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
-              >
-                {isAnalyzing ? 'Analyzing...' : 'Analyze Audio'}
-              </button>
+            <div className="flex flex-col gap-4">
+              {/* Primary Action - Normalize */}
               <button
                 onClick={normalizeAndDownload}
                 disabled={isNormalizing}
-                className="flex-1 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-800 disabled:opacity-50 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
+                className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-purple-800 disabled:opacity-50 text-white font-bold py-4 px-6 rounded-lg transition-colors text-lg"
               >
                 {isNormalizing ? 'Normalizing...' : 'Normalize & Download'}
+              </button>
+              
+              {/* Secondary Action - Analyze */}
+              <button
+                onClick={analyzeFiles}
+                disabled={isAnalyzing}
+                className="w-full bg-blue-600/80 hover:bg-blue-600 disabled:bg-blue-800 disabled:opacity-50 text-white font-semibold py-2 px-6 rounded-lg transition-colors text-sm"
+              >
+                {isAnalyzing ? 'Analyzing...' : 'Just Analyze Audio'}
               </button>
             </div>
           )}
