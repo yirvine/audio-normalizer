@@ -9,9 +9,9 @@ import { TARGET_LUFS, TARGET_TP } from '@/lib/config';
 
 const execAsync = promisify(exec);
 
-async function normalizeTrack(inputPath: string, outputPath: string) {
+async function normalizeTrack(inputPath: string, outputPath: string, gainMultiplier: number) {
   try {
-    console.log(`Starting normalization for: ${path.basename(inputPath)}`);
+    console.log(`Starting normalization for: ${path.basename(inputPath)} with gain multiplier: ${gainMultiplier}`);
 
     // STEP 1: Analyze to get input LUFS
     const analyzeCommand = `ffmpeg -i "${inputPath}" -af "loudnorm=I=${TARGET_LUFS}:TP=${TARGET_TP}:LRA=11:print_format=json" -f null -`;
@@ -26,17 +26,11 @@ async function normalizeTrack(inputPath: string, outputPath: string) {
     const inputLufs = parseFloat(measurements.input_i);
     console.log(`Input: ${inputLufs} LUFS`);
 
-    // STEP 2: Calculate gain with a dynamic, proportional compensation formula.
+    // STEP 2: Calculate gain using a multiplier to prevent over-correction in multi-pass scenarios.
     const baseGain = TARGET_LUFS - inputLufs;
+    const totalGain = baseGain * gainMultiplier;
 
-    // The compensation is adaptive and proportional to the required gain.
-    // This addresses feedback: more aggressive for quiet tracks, and allows
-    // negative compensation for loud tracks.
-    const limiterCompensation = 0.8 * baseGain;
-    
-    const totalGain = baseGain + limiterCompensation;
-
-    console.log(`Base gain: ${baseGain.toFixed(2)}dB, Proportional Compensation: +${limiterCompensation.toFixed(2)}dB, Total Gain: ${totalGain.toFixed(2)}dB`);
+    console.log(`Base gain: ${baseGain.toFixed(2)}dB, Using multiplier: ${gainMultiplier}, Total Gain: ${totalGain.toFixed(2)}dB`);
 
     // STEP 3: Build the correct filter chain for true peak limiting
     // From ffmpeg docs: upsample before alimiter to catch inter-sample peaks.
@@ -119,17 +113,17 @@ export async function POST(request: NextRequest) {
             const secondPassTempPath = path.join(tempOutputDir, `secondpass_${filename}`);
 
             // First pass
-            const firstPassResult = await normalizeTrack(inputPath, firstPassTempPath);
+            const firstPassResult = await normalizeTrack(inputPath, firstPassTempPath, 1.8);
             if (firstPassResult.status !== 'success') {
               result = firstPassResult;
             } else {
               // Second pass
-              const secondPassResult = await normalizeTrack(firstPassTempPath, secondPassTempPath);
+              const secondPassResult = await normalizeTrack(firstPassTempPath, secondPassTempPath, 1.4);
               if (secondPassResult.status !== 'success') {
                 result = secondPassResult;
               } else {
                 // Third pass
-                result = await normalizeTrack(secondPassTempPath, finalOutputPath);
+                result = await normalizeTrack(secondPassTempPath, finalOutputPath, 1.2);
               }
             }
             // Clean up intermediate files
@@ -141,11 +135,11 @@ export async function POST(request: NextRequest) {
             const firstPassTempPath = path.join(tempOutputDir, `firstpass_${filename}`);
             
             // First pass
-            const firstPassResult = await normalizeTrack(inputPath, firstPassTempPath);
+            const firstPassResult = await normalizeTrack(inputPath, firstPassTempPath, 1.8);
             
             if (firstPassResult.status === 'success') {
               // Second pass, using the output of the first as input
-              result = await normalizeTrack(firstPassTempPath, finalOutputPath);
+              result = await normalizeTrack(firstPassTempPath, finalOutputPath, 1.6);
               // Clean up the intermediate file
               try { fs.unlinkSync(firstPassTempPath); } catch (e) { console.error(`Failed to delete temp file: ${firstPassTempPath}`, e); }
             } else {
@@ -154,7 +148,7 @@ export async function POST(request: NextRequest) {
             }
           } else {
             // Standard single-pass normalization
-            result = await normalizeTrack(inputPath, finalOutputPath);
+            result = await normalizeTrack(inputPath, finalOutputPath, 1.8);
           }
 
           return { result, outputPath: finalOutputPath, inputPath };
