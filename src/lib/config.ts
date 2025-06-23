@@ -4,7 +4,7 @@
  */
 
 export const AUDIO_CONFIG = {
-  TARGET_LUFS: -7.0,
+  TARGET_LUFS: -7.5,
   TARGET_TP: -0.4,  // True Peak in dBTP
 } as const;
 
