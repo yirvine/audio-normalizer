@@ -3,21 +3,22 @@
 import React, { useState, useRef } from 'react';
 import { TARGET_LUFS, TARGET_TP } from '@/lib/config';
 
-interface AnalysisResult {
+type AnalysisResult = {
   filename: string;
-  lufs: string | null;
-  tp: string | null;
-  status: string;
-  error?: string;
-}
+  lufs: number | null;
+  peak: number | null;
+  status: 'pending' | 'success' | 'error';
+  errorMessage?: string;
+};
 
-
+type ProcessingMode = 'single' | 'double' | 'triple' | null;
 
 export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
   const [analysisResults, setAnalysisResults] = useState<AnalysisResult[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isNormalizing, setIsNormalizing] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingMode, setProcessingMode] = useState<ProcessingMode>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -42,23 +43,19 @@ export default function Home() {
     
     if (items) {
       // Handle both files and folders
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
+      const promises = Array.from(items).map(item => {
         if (item.kind === 'file') {
           const entry = item.webkitGetAsEntry();
           if (entry) {
-            if (entry.isDirectory) {
-              // It's a folder - get all files from it
-              const files = await getAllFiles(entry);
-              allFiles.push(...files);
-            } else {
-              // It's a single file
-              const file = item.getAsFile();
-              if (file) allFiles.push(file);
-            }
+            return getAllFiles(entry);
           }
         }
-      }
+        return Promise.resolve([]);
+      });
+      
+      const fileArrays = await Promise.all(promises);
+      fileArrays.forEach(fileArray => allFiles.push(...fileArray));
+      
     } else {
       // Fallback for older browsers
       allFiles.push(...Array.from(e.dataTransfer.files));
@@ -73,28 +70,18 @@ export default function Home() {
   };
 
   // Helper function to recursively get all files from a directory
-  async function getAllFiles(dirEntry: any): Promise<File[]> {
+  async function getAllFiles(entry: FileSystemEntry): Promise<File[]> {
     const files: File[] = [];
-    const reader = dirEntry.createReader();
     
-    const readEntries = (): Promise<any[]> => {
-      return new Promise((resolve) => {
-        reader.readEntries(resolve);
-      });
-    };
-    
-    const entries = await readEntries();
-    
-    for (const entry of entries) {
-      if (entry.isFile) {
-        const file: File = await new Promise((resolve) => {
-          entry.file(resolve);
-        });
-        files.push(file);
-      } else if (entry.isDirectory) {
-        const subFiles = await getAllFiles(entry);
-        files.push(...subFiles);
-      }
+    if (entry.isFile) {
+      const file = await new Promise<File>((resolve, reject) => (entry as FileSystemFileEntry).file(resolve, reject));
+      files.push(file);
+    } else if (entry.isDirectory) {
+      const dirReader = (entry as FileSystemDirectoryEntry).createReader();
+      const entries = await new Promise<FileSystemEntry[]>((resolve, reject) => dirReader.readEntries(resolve, reject));
+      const filePromises = entries.map(e => getAllFiles(e));
+      const nestedFiles = await Promise.all(filePromises);
+      nestedFiles.forEach(f => files.push(...f));
     }
     
     return files;
@@ -124,7 +111,7 @@ export default function Home() {
 
       const data = await response.json();
       setAnalysisResults(data.results);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Analysis error:', error);
       alert('Analysis failed. Please try again.');
     } finally {
@@ -132,12 +119,27 @@ export default function Home() {
     }
   };
 
-  const normalizeAndDownload = async () => {
-    if (files.length === 0) return;
+  const handleNormalize = async (isDoublePass: boolean, isTriplePass: boolean = false) => {
+    if (files.length === 0 || isProcessing) return;
 
-    setIsNormalizing(true);
+    let mode: ProcessingMode = 'single';
+    if (isTriplePass) {
+      mode = 'triple';
+    } else if (isDoublePass) {
+      mode = 'double';
+    }
+    setProcessingMode(mode);
+    setIsProcessing(true);
+    setAnalysisResults([]); // Clear previous results
+
     const formData = new FormData();
     files.forEach(file => formData.append('files', file));
+    if (isDoublePass) {
+      formData.append('double_pass', 'true');
+    }
+    if (isTriplePass) {
+      formData.append('triple_pass', 'true');
+    }
 
     try {
       const response = await fetch('/api/normalize', {
@@ -146,29 +148,40 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        throw new Error('Normalization failed');
+        const errorData = await response.json().catch(() => ({ error: 'Normalization failed with no details.' }));
+        throw new Error(errorData.error || 'Normalization request failed');
       }
 
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `normalized_audio_${files.length}_files.zip`;
+      
+      let downloadFilename = `normalized_audio_${files.length}_files.zip`;
+      if (isTriplePass) {
+        downloadFilename = `triple_normalized_audio_${files.length}_files.zip`;
+      } else if (isDoublePass) {
+        downloadFilename = `double_normalized_audio_${files.length}_files.zip`;
+      }
+      a.download = downloadFilename;
+
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Normalization error:', error);
-      alert('Normalization failed. Please try again.');
+      const message = error instanceof Error ? error.message : 'An unknown error occurred.';
+      alert(`Normalization failed: ${message}`);
     } finally {
-      setIsNormalizing(false);
+      setIsProcessing(false);
+      setProcessingMode(null);
     }
   };
 
-  const formatValue = (value: string | null) => {
-    if (!value || value === 'null') return 'N/A';
-    return parseFloat(value).toFixed(1);
+  const formatValue = (value: number | null): string => {
+    if (value === null || typeof value === 'undefined') return 'N/A';
+    return value.toFixed(1);
   };
 
   return (
@@ -253,18 +266,34 @@ export default function Home() {
           {files.length > 0 && (
             <div className="flex flex-col gap-4">
               {/* Primary Action - Normalize */}
-              <button
-                onClick={normalizeAndDownload}
-                disabled={isNormalizing}
-                className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-purple-800 disabled:opacity-50 text-white font-bold py-4 px-6 rounded-lg transition-colors text-lg"
-              >
-                {isNormalizing ? 'Normalizing...' : 'Normalize & Download'}
-              </button>
+              <div className="flex w-full max-w-md space-x-2">
+                <button
+                  onClick={() => handleNormalize(false)}
+                  disabled={isProcessing || files.length === 0}
+                  className="w-1/3 bg-purple-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-purple-700 disabled:bg-purple-900 disabled:text-gray-400 transition-colors duration-200"
+                >
+                  {isProcessing && processingMode === 'single' ? 'Processing...' : 'Normalize'}
+                </button>
+                <button
+                  onClick={() => handleNormalize(true)}
+                  disabled={isProcessing || files.length === 0}
+                  className="w-1/3 bg-orange-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-orange-600 disabled:bg-orange-800 disabled:text-gray-400 transition-colors duration-200"
+                >
+                  {isProcessing && processingMode === 'double' ? 'Processing...' : 'Double-Pass'}
+                </button>
+                <button
+                  onClick={() => handleNormalize(false, true)}
+                  disabled={isProcessing || files.length === 0}
+                  className="w-1/3 bg-red-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-red-700 disabled:bg-red-900 disabled:text-gray-400 transition-colors duration-200"
+                >
+                  {isProcessing && processingMode === 'triple' ? 'Processing...' : 'Triple-Pass'}
+                </button>
+              </div>
               
               {/* Secondary Action - Analyze */}
               <button
                 onClick={analyzeFiles}
-                disabled={isAnalyzing}
+                disabled={isAnalyzing || isProcessing}
                 className="w-full bg-blue-600/80 hover:bg-blue-600 disabled:bg-blue-800 disabled:opacity-50 text-white font-semibold py-2 px-6 rounded-lg transition-colors text-sm"
               >
                 {isAnalyzing ? 'Analyzing...' : 'Just Analyze Audio'}
@@ -292,9 +321,9 @@ export default function Home() {
                         <td className="text-white py-2">{result.filename}</td>
                         <td className="py-2">
                           <span className={`${
-                            result.lufs && parseFloat(result.lufs) < TARGET_LUFS 
+                            result.lufs !== null && result.lufs < TARGET_LUFS 
                               ? 'text-red-400' 
-                              : result.lufs && parseFloat(result.lufs) > TARGET_LUFS
+                              : result.lufs !== null && result.lufs > TARGET_LUFS
                               ? 'text-yellow-400'
                               : 'text-green-400'
                           }`}>
@@ -303,11 +332,11 @@ export default function Home() {
                         </td>
                         <td className="py-2">
                           <span className={`${
-                            result.tp && parseFloat(result.tp) > TARGET_TP 
+                            result.peak !== null && result.peak > TARGET_TP 
                               ? 'text-red-400' 
                               : 'text-green-400'
                           }`}>
-                            {formatValue(result.tp)}
+                            {formatValue(result.peak)}
                           </span>
                         </td>
                         <td className="py-2">

@@ -11,25 +11,33 @@ const execAsync = promisify(exec);
 async function analyzeTrack(filePath: string) {
   const startTime = Date.now();
   try {
-    const command = `ffmpeg -threads 2 -i "${filePath}" -af "loudnorm=I=${TARGET_LUFS}:TP=${TARGET_TP}:LRA=11:print_format=summary" -f null -`;
+    // Use more robust ffmpeg command with increased timeout for large files
+    const command = `ffmpeg -hide_banner -threads 2 -i "${filePath}" -af "loudnorm=I=${TARGET_LUFS}:TP=${TARGET_TP}:LRA=11:print_format=summary" -f null - 2>&1`;
     
-    const { stderr } = await execAsync(command, { timeout: 30000 }); // Shorter timeout
-    
-    let lufs = null;
-    let tp = null;
+         const { stdout, stderr } = await execAsync(command, { 
+       timeout: 45000, // Increased timeout
+       maxBuffer: 1024 * 1024 // 1MB buffer
+     });
+     
+     let lufs = null;
+     let tp = null;
 
-    const lines = stderr.split('\n');
+     // With 2>&1, output goes to stdout
+     const output = stdout || stderr || '';
+     const lines = output.split('\n');
     for (const line of lines) {
       if (line.includes('Input Integrated')) {
         const match = line.split(':');
         if (match[1]) {
-          lufs = match[1].trim().replace(' LUFS', '');
+          const lufsValue = match[1].trim().replace(' LUFS', '');
+          lufs = parseFloat(lufsValue);
         }
       }
       if (line.includes('Input True Peak')) {
         const match = line.split(':');
         if (match[1]) {
-          tp = match[1].trim().replace(' dBTP', '');
+          const tpValue = match[1].trim().replace(' dBTP', '');
+          tp = parseFloat(tpValue);
         }
       }
     }
@@ -40,17 +48,20 @@ async function analyzeTrack(filePath: string) {
     return {
       filename: path.basename(filePath),
       lufs,
-      tp,
+      peak: tp,
       status: 'success'
     };
 
   } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error(`Analysis failed for ${path.basename(filePath)}:`, errorMessage);
+    
     return {
       filename: path.basename(filePath),
       lufs: null,
-      tp: null,
+      peak: null,
       status: 'error',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: errorMessage
     };
   }
 }

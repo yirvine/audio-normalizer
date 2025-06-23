@@ -11,31 +11,54 @@ const execAsync = promisify(exec);
 
 async function normalizeTrack(inputPath: string, outputPath: string) {
   try {
-    // PASS 1: Analyze the file to get precise measurements
-    const pass1Command = `ffmpeg -i "${inputPath}" -af "loudnorm=I=${TARGET_LUFS}:TP=${TARGET_TP}:LRA=11:print_format=json" -f null -`;
-    const { stderr: pass1Output } = await execAsync(pass1Command, { timeout: 60000 });
-    
-    // Extract measurements from pass 1
-    const jsonMatch = pass1Output.match(/\{[\s\S]*\}/);
+    console.log(`Starting normalization for: ${path.basename(inputPath)}`);
+
+    // STEP 1: Analyze to get input LUFS
+    const analyzeCommand = `ffmpeg -i "${inputPath}" -af "loudnorm=I=${TARGET_LUFS}:TP=${TARGET_TP}:LRA=11:print_format=json" -f null -`;
+    const { stderr: analyzeOutput } = await execAsync(analyzeCommand, { timeout: 60000 });
+
+    const jsonMatch = analyzeOutput.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      throw new Error('Failed to get analysis data from pass 1');
+      throw new Error('Failed to get analysis data');
     }
-    
+
     const measurements = JSON.parse(jsonMatch[0]);
-    const measuredI = measurements.input_i;
-    const measuredTP = measurements.input_tp;
-    const measuredLRA = measurements.input_lra;
-    const measuredThresh = measurements.input_thresh;
-    const targetOffset = measurements.target_offset;
+    const inputLufs = parseFloat(measurements.input_i);
+    console.log(`Input: ${inputLufs} LUFS`);
+
+    // STEP 2: Calculate gain with a dynamic, proportional compensation formula.
+    const baseGain = TARGET_LUFS - inputLufs;
+
+    // The compensation is adaptive and proportional to the required gain.
+    // This addresses feedback: more aggressive for quiet tracks, and allows
+    // negative compensation for loud tracks.
+    const limiterCompensation = 0.8 * baseGain;
     
-    // PASS 2: Apply precise normalization using pass 1 measurements
-    const pass2Command = `ffmpeg -y -threads 4 -i "${inputPath}" -af "loudnorm=I=${TARGET_LUFS}:TP=${TARGET_TP}:LRA=11:measured_I=${measuredI}:measured_TP=${measuredTP}:measured_LRA=${measuredLRA}:measured_thresh=${measuredThresh}:offset=${targetOffset}:linear=true:print_format=summary" -ar 44100 -c:a libmp3lame -b:a 320k "${outputPath}"`;
-    
-    await execAsync(pass2Command, { timeout: 300000 });
-    
-    return { status: 'success', message: 'Normalized successfully (two-pass)' };
-    
+    const totalGain = baseGain + limiterCompensation;
+
+    console.log(`Base gain: ${baseGain.toFixed(2)}dB, Proportional Compensation: +${limiterCompensation.toFixed(2)}dB, Total Gain: ${totalGain.toFixed(2)}dB`);
+
+    // STEP 3: Build the correct filter chain for true peak limiting
+    // From ffmpeg docs: upsample before alimiter to catch inter-sample peaks.
+    const limiterValue = Math.pow(10, TARGET_TP / 20); // -0.4 dBTP ≈ 0.955 linear
+
+    const filterchain = [
+      `volume=${totalGain.toFixed(2)}dB`,
+      'aresample=resampler=soxr:out_sample_rate=192000', // Upsample for true peak detection
+      `alimiter=limit=${limiterValue.toFixed(3)}:attack=1:release=50:level=false`,
+      'aresample=resampler=soxr:out_sample_rate=44100'  // Downsample back to original rate
+    ].join(',');
+
+    const normalizeCommand = `ffmpeg -y -threads 4 -i "${inputPath}" -af "${filterchain}" -ar 44100 -c:a libmp3lame -b:a 320k "${outputPath}"`;
+    console.log(`Normalize command: ${normalizeCommand}`);
+
+    await execAsync(normalizeCommand, { timeout: 300000 });
+
+    console.log(`Successfully normalized: ${path.basename(inputPath)}`);
+    return { status: 'success', message: `Normalized successfully (gain: ${totalGain.toFixed(1)}dB)` };
+
   } catch (error) {
+    console.error(`Error normalizing ${path.basename(inputPath)}:`, error);
     return { status: 'error', message: error instanceof Error ? error.message : 'Unknown error' };
   }
 }
@@ -44,6 +67,8 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const files = formData.getAll('files') as File[];
+    const isDoublePass = formData.get('double_pass') === 'true';
+    const isTriplePass = formData.get('triple_pass') === 'true';
 
     if (!files || files.length === 0) {
       return NextResponse.json({ error: 'No files uploaded' }, { status: 400 });
@@ -84,12 +109,55 @@ export async function POST(request: NextRequest) {
         const batch = inputFiles.slice(i, i + BATCH_SIZE);
         const batchResults = await Promise.all(batch.map(async (inputPath) => {
           const filename = path.basename(inputPath);
-          const name = path.parse(filename).name;
-          const outputFilename = `${name}_normalized.mp3`;
-          const outputPath = path.join(tempOutputDir, outputFilename);
-          
-          const result = await normalizeTrack(inputPath, outputPath);
-          return { result, outputPath, inputPath };
+          const finalOutputPath = path.join(tempOutputDir, filename);
+
+          let result;
+
+          if (isTriplePass) {
+            console.log(`Performing triple-pass normalization for ${filename}`);
+            const firstPassTempPath = path.join(tempOutputDir, `firstpass_${filename}`);
+            const secondPassTempPath = path.join(tempOutputDir, `secondpass_${filename}`);
+
+            // First pass
+            const firstPassResult = await normalizeTrack(inputPath, firstPassTempPath);
+            if (firstPassResult.status !== 'success') {
+              result = firstPassResult;
+            } else {
+              // Second pass
+              const secondPassResult = await normalizeTrack(firstPassTempPath, secondPassTempPath);
+              if (secondPassResult.status !== 'success') {
+                result = secondPassResult;
+              } else {
+                // Third pass
+                result = await normalizeTrack(secondPassTempPath, finalOutputPath);
+              }
+            }
+            // Clean up intermediate files
+            try { fs.unlinkSync(firstPassTempPath); } catch { /* ignore */ }
+            try { fs.unlinkSync(secondPassTempPath); } catch { /* ignore */ }
+
+          } else if (isDoublePass) {
+            console.log(`Performing double-pass normalization for ${filename}`);
+            const firstPassTempPath = path.join(tempOutputDir, `firstpass_${filename}`);
+            
+            // First pass
+            const firstPassResult = await normalizeTrack(inputPath, firstPassTempPath);
+            
+            if (firstPassResult.status === 'success') {
+              // Second pass, using the output of the first as input
+              result = await normalizeTrack(firstPassTempPath, finalOutputPath);
+              // Clean up the intermediate file
+              try { fs.unlinkSync(firstPassTempPath); } catch (e) { console.error(`Failed to delete temp file: ${firstPassTempPath}`, e); }
+            } else {
+              // If the first pass fails, the entire process fails for this file
+              result = firstPassResult;
+            }
+          } else {
+            // Standard single-pass normalization
+            result = await normalizeTrack(inputPath, finalOutputPath);
+          }
+
+          return { result, outputPath: finalOutputPath, inputPath };
         }));
         results.push(...batchResults);
         
@@ -117,8 +185,15 @@ export async function POST(request: NextRequest) {
         }, { status: 500 });
       }
 
-      // Create zip archive
-      const zipPath = path.join(tempOutputDir, `normalized_audio_${sessionId}.zip`);
+      // Create zip archive with appropriate naming
+      let zipPrefix = 'normalized_audio';
+      if (isTriplePass) {
+        zipPrefix = 'triple_normalized_audio';
+      } else if (isDoublePass) {
+        zipPrefix = 'double_normalized_audio';
+      }
+      
+      const zipPath = path.join(tempOutputDir, `${zipPrefix}_${sessionId}.zip`);
       
       await new Promise<void>((resolve, reject) => {
         const output = fs.createWriteStream(zipPath);
@@ -143,7 +218,7 @@ export async function POST(request: NextRequest) {
         status: 200,
         headers: {
           'Content-Type': 'application/zip',
-          'Content-Disposition': `attachment; filename="normalized_audio_${successfulFiles.length}_files.zip"`,
+          'Content-Disposition': `attachment; filename="${zipPrefix}_${successfulFiles.length}_files.zip"`,
         },
       });
 
