@@ -57,6 +57,32 @@ async function normalizeTrack(inputPath: string, outputPath: string, gainMultipl
   }
 }
 
+function findCommonBaseName(files: File[]): string {
+  if (files.length === 0) {
+    return 'normalized_audio';
+  }
+
+  const firstFileName = files[0].name.replace(/\.[^/.]+$/, ""); // remove extension
+  if (files.length === 1) {
+    return firstFileName;
+  }
+
+  let commonPrefix = '';
+  for (let i = 0; i < firstFileName.length; i++) {
+    const char = firstFileName[i];
+    for (let j = 1; j < files.length; j++) {
+      if (i >= files[j].name.length || files[j].name[i] !== char) {
+        // Trim to last separator to avoid partial words
+        const lastSeparatorIndex = commonPrefix.lastIndexOf(' ');
+        return lastSeparatorIndex > 0 ? commonPrefix.substring(0, lastSeparatorIndex) : (commonPrefix || firstFileName.split(' ')[0]);
+      }
+    }
+    commonPrefix += char;
+  }
+
+  return commonPrefix || 'normalized_audio';
+}
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -180,14 +206,16 @@ export async function POST(request: NextRequest) {
       }
 
       // Create zip archive with appropriate naming
-      let zipPrefix = 'normalized_audio';
+      const baseName = findCommonBaseName(files);
+      let suffix = '_SN'; // Single Pass
       if (isTriplePass) {
-        zipPrefix = 'triple_normalized_audio';
+        suffix = '_TN'; // Triple Pass
       } else if (isDoublePass) {
-        zipPrefix = 'double_normalized_audio';
+        suffix = '_DN'; // Double Pass
       }
       
-      const zipPath = path.join(tempOutputDir, `${zipPrefix}_${sessionId}.zip`);
+      const zipFilename = `${baseName}${suffix}.zip`;
+      const zipPath = path.join(tempOutputDir, zipFilename);
       
       await new Promise<void>((resolve, reject) => {
         const output = fs.createWriteStream(zipPath);
@@ -212,7 +240,7 @@ export async function POST(request: NextRequest) {
         status: 200,
         headers: {
           'Content-Type': 'application/zip',
-          'Content-Disposition': `attachment; filename="${zipPrefix}_${successfulFiles.length}_files.zip"`,
+          'Content-Disposition': `attachment; filename="${zipFilename}"`,
         },
       });
 
