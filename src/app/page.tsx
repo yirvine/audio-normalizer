@@ -20,6 +20,7 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMode, setProcessingMode] = useState<ProcessingMode>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isProcessingRef = useRef(false); // Ref to track processing state synchronously
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(event.target.files || []);
@@ -120,7 +121,19 @@ export default function Home() {
   };
 
   const handleNormalize = async (isDoublePass: boolean, isTriplePass: boolean = false) => {
-    if (files.length === 0 || isProcessing) return;
+    // Prevent duplicate requests with synchronous ref checking
+    if (files.length === 0) {
+      alert('Please select MP3 files first');
+      return;
+    }
+    
+    if (isProcessing || isProcessingRef.current) {
+      console.log('Request blocked - normalization already in progress');
+      return;
+    }
+
+    // Set processing flag immediately and synchronously
+    isProcessingRef.current = true;
 
     let mode: ProcessingMode = 'single';
     if (isTriplePass) {
@@ -128,6 +141,7 @@ export default function Home() {
     } else if (isDoublePass) {
       mode = 'double';
     }
+    
     setProcessingMode(mode);
     setIsProcessing(true);
     setAnalysisResults([]); // Clear previous results
@@ -176,6 +190,7 @@ export default function Home() {
     } finally {
       setIsProcessing(false);
       setProcessingMode(null);
+      isProcessingRef.current = false; // Reset the synchronous flag
     }
   };
 
@@ -270,23 +285,23 @@ export default function Home() {
                 <button
                   onClick={() => handleNormalize(false)}
                   disabled={isProcessing || files.length === 0}
-                  className="w-1/3 bg-purple-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-purple-700 disabled:bg-purple-900 disabled:text-gray-400 transition-colors duration-200"
+                  className="w-1/3 bg-purple-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-purple-700 disabled:bg-purple-900 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors duration-200"
                 >
-                  {isProcessing && processingMode === 'single' ? 'Processing...' : 'Normalize'}
+                  {isProcessing && processingMode === 'single' ? '⏳ Processing...' : 'Normalize'}
                 </button>
                 <button
                   onClick={() => handleNormalize(true)}
                   disabled={isProcessing || files.length === 0}
-                  className="w-1/3 bg-orange-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-orange-600 disabled:bg-orange-800 disabled:text-gray-400 transition-colors duration-200"
+                  className="w-1/3 bg-orange-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-orange-600 disabled:bg-orange-800 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors duration-200"
                 >
-                  {isProcessing && processingMode === 'double' ? 'Processing...' : 'Double-Pass'}
+                  {isProcessing && processingMode === 'double' ? '⏳ Processing...' : 'Double-Pass'}
                 </button>
                 <button
                   onClick={() => handleNormalize(false, true)}
                   disabled={isProcessing || files.length === 0}
-                  className="w-1/3 bg-red-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-red-700 disabled:bg-red-900 disabled:text-gray-400 transition-colors duration-200"
+                  className="w-1/3 bg-red-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-red-700 disabled:bg-red-900 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors duration-200"
                 >
-                  {isProcessing && processingMode === 'triple' ? 'Processing...' : 'Triple-Pass'}
+                  {isProcessing && processingMode === 'triple' ? '⏳ Processing...' : 'Triple-Pass'}
                 </button>
               </div>
               

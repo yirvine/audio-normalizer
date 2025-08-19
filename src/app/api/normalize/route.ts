@@ -241,6 +241,7 @@ export async function POST(request: NextRequest) {
         headers: {
           'Content-Type': 'application/zip',
           'Content-Disposition': `attachment; filename="${zipFilename}"`,
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
         },
       });
 
