@@ -1,171 +1,104 @@
 # LUFS Audio Normalizer Web App
 
-A modern web application for batch audio normalization using LUFS (Loudness Units relative to Full Scale) instead of traditional RMS-based normalization. Built with Next.js and powered by ffmpeg's professional-grade loudnorm filter.
+A web application for batch MP3 loudness normalization to a target integrated loudness (LUFS) and true peak (dBTP) using ffmpeg. The app exposes a drag‑and‑drop UI and Next.js API routes that perform analysis and normalization on the server.
 
-![LUFS Audio Normalizer](https://img.shields.io/badge/LUFS-Audio%20Normalizer-purple?style=for-the-badge)
-![Next.js](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js)
-![TypeScript](https://img.shields.io/badge/TypeScript-blue?style=flat-square&logo=typescript)
-![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-38B2AC?style=flat-square&logo=tailwind-css)
+## Features
 
-## ✨ Features
+- Batch MP3 upload (files or folders)
+- Loudness analysis (integrated LUFS and true peak) via ffmpeg loudnorm
+- Normalization with single, double, or triple pass options
+- Zip packaging of normalized outputs
+- 320 kbps MP3 output at 44.1 kHz
 
-- **🎵 Professional LUFS Normalization** - Accurate loudness standardization using EBU R128 standards
-- **🖱️ Drag & Drop Interface** - Modern, intuitive file upload with visual feedback
-- **📊 Real-time Analysis** - Color-coded LUFS/dBTP analysis with visual indicators
-- **⚡ Batch Processing** - Smart batching system handles multiple files efficiently
-- **🎯 Precision Targeting** - Two-pass normalization for accurate -7.5 LUFS / -0.4 dBTP results
-- **📦 Zip Downloads** - Automatically packages normalized files for easy download
-- **🚀 High Performance** - Parallel processing with optimized ffmpeg workflows
-- **💎 Quality Preservation** - Maintains original bitrate and sample rate (320kbps/44.1kHz output)
+## Target parameters
 
-## 🎯 Target Specifications
+- LUFS target: −7.5 LUFS (configurable)
+- True peak target: −0.4 dBTP (configurable)
 
-- **LUFS Target:** -7.5 LUFS (configurable)
-- **True Peak Target:** -0.4 dBTP (configurable)
-- **Output Quality:** 320kbps MP3, 44.1kHz
-- **Processing Accuracy:** ±0.5 LUFS tolerance (professional-grade)
+## Technology
 
-## 🛠️ Technology Stack
+- Frontend: Next.js 15, React 19, TypeScript
+- Styling: Tailwind CSS 4
+- Server: Next.js App Router API routes
+- Audio processing: ffmpeg (loudnorm + limiter)
 
-- **Frontend:** Next.js 15, React 19, TypeScript
-- **Styling:** Tailwind CSS 4
-- **Audio Processing:** ffmpeg with loudnorm filter
-- **Architecture:** Serverless-ready with Next.js API routes
-- **Deployment:** Optimized for Vercel
+## Requirements
 
-## 📋 Requirements
+- Node.js 18+
+- ffmpeg available in PATH
+- npm or yarn
 
-- **Node.js** 18+ 
-- **ffmpeg** (must be installed and available in PATH)
-- **npm** or **yarn**
+## Installation
 
-## 🚀 Installation
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/yirvine/audio-normalizer.git
-   cd audio-normalizer
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Ensure ffmpeg is installed:**
-   ```bash
-   # macOS
-   brew install ffmpeg
-   
-   # Ubuntu/Debian
-   sudo apt update && sudo apt install ffmpeg
-   
-   # Windows
-   # Download from https://ffmpeg.org/download.html
-   ```
-
-4. **Run the development server:**
-   ```bash
-   npm run dev
-   ```
-
-5. **Open your browser:**
-   Navigate to `http://localhost:3000`
-
-## 💡 How to Use
-
-1. **Upload Files** - Drag and drop MP3 files or click to select
-2. **Analyze Audio** - Click "Analyze Audio" to see current LUFS/dBTP values
-3. **Review Results** - Color-coded table shows which files need normalization
-4. **Normalize & Download** - Click "Normalize & Download" to process and get zip file
-
-### Color Coding
-- 🔴 **Red:** Below target LUFS (needs normalization)
-- 🟡 **Yellow:** Above target LUFS (needs normalization) 
-- 🟢 **Green:** Within acceptable range
-
-## ⚙️ How It Works
-
-### Analysis Phase
-- Utilizes ffmpeg's loudnorm filter in analysis mode
-- Extracts precise LUFS and True Peak measurements
-- Processes files in batches of 20 for optimal performance
-
-### Normalization Phase  
-- **Two-pass processing** for maximum accuracy:
-  1. **Pass 1:** Analyzes file and generates precise measurements
-  2. **Pass 2:** Applies normalization using exact measurements
-- Smart batching (8 files simultaneously) prevents system overload
-- Preserves original audio quality while adjusting only loudness
-
-## 🚀 Deployment
-
-### Vercel (Recommended)
 ```bash
-# Install Vercel CLI
-npm i -g vercel
-
-# Deploy
-vercel
+git clone https://github.com/yirvine/audio-normalizer.git
+cd mp3-normalizer
+npm install
+npm run dev
 ```
 
-### Other Platforms
-- **Railway:** Connect GitHub repo, auto-deploy
-- **Netlify:** Supports Next.js with API routes
-- **Self-hosted:** Standard Node.js deployment
+Open `http://localhost:3000`.
 
-## 🔧 Configuration
+## Usage
 
-Edit target values in both frontend and backend:
+1. Drag and drop MP3 files (or folders), or click to select files.
+2. Optionally run analysis to view current LUFS and dBTP per file.
+3. Normalize using single, double, or triple pass. The server returns a zip archive of processed files.
 
-**Centralized Config** (`src/lib/config.ts`):
+Download naming:
+- Server archive name: `<base>_SN.zip` (single), `<base>_DN.zip` (double), `<base>_TN.zip` (triple)
+- Current UI download name: `normalized_audio_<n>_files.zip`, `double_normalized_audio_<n>_files.zip`, `triple_normalized_audio_<n>_files.zip`
+
+## Processing details
+
+### Endpoints
+- `POST /api/analyze`: extracts integrated LUFS and true peak using `loudnorm` (print_format=summary). Processed in batches of 20.
+- `POST /api/normalize`: performs normalization and packages results. Processed in batches of 8.
+
+### Analysis
+Command shape:
+```bash
+ffmpeg -hide_banner -threads 2 -i <input> -af "loudnorm=I=<TARGET_LUFS>:TP=<TARGET_TP>:LRA=11:print_format=summary" -f null -
+```
+
+### Normalization
+Flow per file:
+1. Measure input LUFS with `loudnorm` (print_format=json).
+2. Compute base gain: `TARGET_LUFS - input_i`. Apply a pass‑dependent multiplier.
+3. Apply filter chain for loudness gain and true‑peak limiting, then encode MP3 320k at 44.1 kHz.
+
+Filter chain used:
+```text
+volume=<gain>dB, aresample=resampler=soxr:out_sample_rate=192000, alimiter=limit=<linear(TP)>:attack=1:release=50:level=false, aresample=resampler=soxr:out_sample_rate=44100
+```
+
+Output encoding:
+```bash
+ffmpeg -y -threads 4 -i <input> -af "<filterchain>" -ar 44100 -c:a libmp3lame -b:a 320k <output>
+```
+
+Zip packaging is performed server‑side via `archiver` and returned as the response body; temporary files and directories are cleaned up after each request.
+
+## Configuration
+
+Targets are defined in `src/lib/config.ts` and used in both the client and API routes:
 ```typescript
 export const AUDIO_CONFIG = {
   TARGET_LUFS: -7.5,
   TARGET_TP: -0.4,  // True Peak in dBTP
 } as const;
+export const { TARGET_LUFS, TARGET_TP } = AUDIO_CONFIG;
 ```
 
-## 📈 Performance
+## Deployment
 
-- **Analysis:** ~47 seconds for 40 tracks
-- **Normalization:** ~85 seconds for 40 tracks  
-- **Batch sizes:** 20 files (analysis), 8 files (normalization)
-- **Concurrent processing:** Optimized for system resources
+Designed to run on platforms that support Next.js App Router API routes (e.g., Vercel). Ensure `ffmpeg` is available in the execution environment.
 
-## 🎨 UI/UX Features
+## Notes
 
-- **Modern glassmorphism design** with purple gradient theme
-- **Responsive layout** works on desktop and mobile
-- **Real-time progress feedback** during processing
-- **Professional data visualization** with color-coded analysis tables
-- **Intuitive drag-and-drop** file upload experience
+- Supported input: MP3. Output: MP3 320 kbps at 44.1 kHz.
+- Concurrency is implemented via batched `Promise.all` execution (20 for analysis, 8 for normalization).
 
-## 🔍 Technical Details
+## License
 
-- **File size limit:** 100MB per request (configurable)
-- **Supported formats:** MP3 files
-- **Output format:** 320kbps MP3, 44.1kHz, stereo
-- **Processing:** Server-side with Node.js and ffmpeg
-- **Cleanup:** Automatic temporary file management
-
-## 📝 License
-
-MIT License - feel free to use for personal or commercial projects.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📞 Support
-
-- **Issues:** [GitHub Issues](https://github.com/yirvine/audio-normalizer/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/yirvine/audio-normalizer/discussions)
-
----
-
-**Built with ❤️ for audio professionals, DJs, and music enthusiasts who demand precise loudness control.**
+MIT
