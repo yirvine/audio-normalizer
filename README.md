@@ -10,8 +10,9 @@ A web application for batch MP3 loudness normalization to a target integrated lo
 - Analysis results after running Analyze (LUFS and True Peak per file)
 ![Analysis results — LUFS and TP](public/shot2.png)
 
-- Triple‑pass normalization; all tracks reach −7.5 LUFS and −0.4 dBTP
-![Triple‑pass normalized to targets](public/shot3.png)
+- Double‑pass normalization; all tracks are significantly closer to each other in perceived loudness
+(target of −7.5 LUFS and −0.4 dBTP)
+![Double‑pass normalized to targets](public/shot3.png)
 
 ## Features
 
