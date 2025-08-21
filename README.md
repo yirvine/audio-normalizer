@@ -2,6 +2,17 @@
 
 A web application for batch MP3 loudness normalization to a target integrated loudness (LUFS) and true peak (dBTP) using ffmpeg. The app exposes a drag‑and‑drop UI and Next.js API routes that perform analysis and normalization on the server.
 
+## Screenshots
+
+- Main page with 5 uploaded tracks
+![Main page — 5 tracks uploaded](public/shot1.png)
+
+- Analysis results after running Analyze (LUFS and True Peak per file)
+![Analysis results — LUFS and TP](public/shot2.png)
+
+- Triple‑pass normalization; all tracks reach −7.5 LUFS and −0.4 dBTP
+![Triple‑pass normalized to targets](public/shot3.png)
+
 ## Features
 
 - Batch MP3 upload (files or folders)
